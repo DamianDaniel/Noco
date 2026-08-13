@@ -138,7 +138,7 @@ Bug reports, patches, themes, packaging help, and design feedback are welcome.
 
 ## License
 
-Add your license here.
+
 
 ## Gallery
 
