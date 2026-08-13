@@ -30,19 +30,27 @@ void handle_map_request(WmState *wm, XMapRequestEvent *ev) {
     int actual_format;
     unsigned long nitems, bytes_after;
     unsigned char *data = NULL;
-    int is_dock = 0;
+    int is_dock = 0, is_utility = 0, is_notification = 0;
     if (XGetWindowProperty(wm->dpy, ev->window, wm->net_wm_window_type, 0, 16,
             False, XA_ATOM, &actual_type, &actual_format, &nitems, &bytes_after,
             &data) == Success && data) {
         Atom *atoms = (Atom *)data;
-        for (unsigned long i = 0; i < nitems; i++)
+        Atom net_wm_window_type_utility = XInternAtom(wm->dpy, "_NET_WM_WINDOW_TYPE_UTILITY", False);
+        Atom net_wm_window_type_notification = XInternAtom(wm->dpy, "_NET_WM_WINDOW_TYPE_NOTIFICATION", False);
+        for (unsigned long i = 0; i < nitems; i++) {
             if (atoms[i] == wm->net_wm_window_type_dock) is_dock = 1;
+            if (atoms[i] == net_wm_window_type_utility) is_utility = 1;
+            if (atoms[i] == net_wm_window_type_notification) is_notification = 1;
+        }
         XFree(data);
     }
 
-    if (is_dock) {
+    if (is_dock || is_utility || is_notification) {
         XMapWindow(wm->dpy, ev->window);
-        update_work_area(wm);
+        if (is_dock) update_work_area(wm);
+        if (is_utility) {
+            XSetInputFocus(wm->dpy, ev->window, RevertToPointerRoot, CurrentTime);
+        }
         return;
     }
 
@@ -254,6 +262,9 @@ void handle_button_press(WmState *wm, XButtonEvent *ev) {
 void handle_button_release(WmState *wm, XButtonEvent *ev) {
     (void)ev;
     if (wm->drag_active) {
+        if (wm->drag_mode == DRAG_MOVE && wm->drag_client) {
+            redraw_decorations(wm, wm->drag_client);
+        }
         XUngrabPointer(wm->dpy, CurrentTime);
         wm->drag_active = 0;
         wm->drag_mode = DRAG_NONE;
@@ -270,8 +281,7 @@ void handle_motion_notify(WmState *wm, XMotionEvent *ev) {
     Client *c = wm->drag_client;
 
     if (wm->drag_mode == DRAG_MOVE) {
-        client_move_resize(wm, c,
-            wm->drag_orig_x + dx, wm->drag_orig_y + dy, c->w, c->h);
+        client_reposition(wm, c, wm->drag_orig_x + dx, wm->drag_orig_y + dy);
     } else if (wm->drag_mode == DRAG_RESIZE) {
         int x = wm->drag_orig_x, y = wm->drag_orig_y;
         int w = wm->drag_orig_w, h = wm->drag_orig_h;

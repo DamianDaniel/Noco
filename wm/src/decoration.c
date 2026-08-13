@@ -7,8 +7,8 @@
 #include "wm.h"
 #include "render.h"
 
-#define BTN_SIZE 22
-#define BTN_PAD 4
+#define BTN_SIZE 20
+#define BTN_PAD 5
 
 void get_client_title(WmState *wm, Client *c, char *buf, size_t buflen) {
     char *name = NULL;
@@ -60,8 +60,8 @@ int hit_test_frame(WmState *wm, Client *c, int lx, int ly, int *out_edges) {
 }
 
 static void draw_button_glyph(cairo_t *cr, int type, double cx, double cy, double s) {
-    cairo_set_line_width(cr, 1.4);
-    cairo_set_source_rgba(cr, 1, 1, 1, 0.85);
+    cairo_set_line_width(cr, 1.3);
+    cairo_set_source_rgba(cr, 1, 1, 1, 0.9);
 
     if (type == HIT_CLOSE) {
         cairo_move_to(cr, cx - s, cy - s);
@@ -80,26 +80,41 @@ static void draw_button_glyph(cairo_t *cr, int type, double cx, double cy, doubl
 }
 
 void redraw_decorations(WmState *wm, Client *c) {
-    XSetWindowBackground(wm->dpy, c->frame,
-        (wm->focused == c) ? wm->cfg.focus_color : wm->cfg.border_color);
-    XClearWindow(wm->dpy, c->frame);
-
     cairo_surface_t *surface = cairo_xlib_surface_create(
         wm->dpy, c->frame, DefaultVisual(wm->dpy, wm->screen), c->w, c->h);
     cairo_t *cr = cairo_create(surface);
 
-    noco_draw_pseudo_transparent(cr, &wm->wc, &wm->cfg,
-        c->x, c->y, c->w, wm->cfg.titlebar_height,
-        wm->cfg.corner_radius, NOCO_CORNER_TOP_LEFT | NOCO_CORNER_TOP_RIGHT);
+    int focused = (wm->focused == c);
 
-    if (wm->focused == c) {
+    noco_draw_pseudo_transparent(cr, &wm->wc, &wm->cfg,
+        c->x, c->y, c->w, c->h,
+        wm->cfg.corner_radius, NOCO_CORNER_ALL);
+
+    unsigned long accent = focused ? wm->cfg.focus_color : wm->cfg.border_color;
+    cairo_set_source_rgba(cr,
+        ((accent >> 16) & 0xFF) / 255.0,
+        ((accent >> 8) & 0xFF) / 255.0,
+        (accent & 0xFF) / 255.0,
+        focused ? 0.22 : 0.12);
+    noco_rounded_rect_path(cr, c->w, c->h, wm->cfg.corner_radius, NOCO_CORNER_ALL);
+    cairo_fill(cr);
+
+    if (focused) {
         cairo_set_source_rgba(cr,
             ((wm->cfg.focus_color >> 16) & 0xFF) / 255.0,
             ((wm->cfg.focus_color >> 8) & 0xFF) / 255.0,
-            (wm->cfg.focus_color & 0xFF) / 255.0, 0.35);
+            (wm->cfg.focus_color & 0xFF) / 255.0, 0.28);
+        cairo_rectangle(cr, 0, 0, c->w, wm->cfg.titlebar_height);
+        cairo_fill(cr);
+    } else {
+        cairo_set_source_rgba(cr, 0, 0, 0, 0.15);
         cairo_rectangle(cr, 0, 0, c->w, wm->cfg.titlebar_height);
         cairo_fill(cr);
     }
+
+    cairo_set_source_rgba(cr, 1, 1, 1, focused ? 0.10 : 0.05);
+    cairo_rectangle(cr, 0, 0, c->w, 1);
+    cairo_fill(cr);
 
     char title[128];
     get_client_title(wm, c, title, sizeof(title));
@@ -109,7 +124,7 @@ void redraw_decorations(WmState *wm, Client *c) {
         ((wm->cfg.titlebar_text_color >> 16) & 0xFF) / 255.0,
         ((wm->cfg.titlebar_text_color >> 8) & 0xFF) / 255.0,
         (wm->cfg.titlebar_text_color & 0xFF) / 255.0,
-        wm->focused == c ? 0.95 : 0.55);
+        focused ? 0.95 : 0.5);
 
     cairo_text_extents_t ext;
     cairo_text_extents(cr, title, &ext);
@@ -122,17 +137,19 @@ void redraw_decorations(WmState *wm, Client *c) {
     int types[3] = {HIT_CLOSE, HIT_MAXIMIZE, HIT_MINIMIZE};
     for (int i = 0; i < 3; i++) {
         double bx = rects[i][0], by = rects[i][1], bw = rects[i][2], bh = rects[i][3];
+
+        cairo_save(cr);
+        cairo_translate(cr, bx, by);
+
         if (types[i] == HIT_CLOSE) {
-            cairo_set_source_rgba(cr, 0.85, 0.25, 0.25, 0.9);
+            cairo_set_source_rgba(cr, 0.85, 0.25, 0.25, 0.85);
         } else {
             cairo_set_source_rgba(cr, 1, 1, 1, 0.10);
         }
         noco_rounded_rect_path(cr, bw, bh, 5, NOCO_CORNER_ALL);
-        cairo_save(cr);
-        cairo_translate(cr, bx, by);
-        noco_rounded_rect_path(cr, bw, bh, 5, NOCO_CORNER_ALL);
         cairo_fill(cr);
-        draw_button_glyph(cr, types[i], bw / 2.0, bh / 2.0, 3.5);
+
+        draw_button_glyph(cr, types[i], bw / 2.0, bh / 2.0, 3.2);
         cairo_restore(cr);
     }
 

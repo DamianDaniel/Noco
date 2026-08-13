@@ -160,6 +160,13 @@ void client_move_resize(WmState *wm, Client *c, int x, int y, int w, int h) {
     redraw_decorations(wm, c);
 }
 
+void client_reposition(WmState *wm, Client *c, int x, int y) {
+    c->x = x;
+    c->y = y;
+    c->snap = SNAP_NONE;
+    XMoveWindow(wm->dpy, c->frame, x, y);
+}
+
 void client_snap(WmState *wm, Client *c, SnapState snap) {
     int wx = wm->work_x, wy = wm->work_y, ww = wm->work_w, wh = wm->work_h;
     int gap = wm->cfg.gap;

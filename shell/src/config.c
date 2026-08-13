@@ -37,6 +37,9 @@ static void set_defaults(NocoConfig *cfg) {
     cfg->notif_margin = 12;
     cfg->notif_spacing = 8;
     g_strlcpy(cfg->notif_position, "top-right", sizeof(cfg->notif_position));
+
+    g_strlcpy(cfg->lock_cmd, "loginctl lock-session", sizeof(cfg->lock_cmd));
+    g_strlcpy(cfg->power_cmd, "systemctl poweroff", sizeof(cfg->power_cmd));
 }
 
 static unsigned int parse_mod_key(const char *s) {
@@ -202,6 +205,20 @@ void noco_config_load(NocoConfig *cfg) {
     if (npos) {
         g_strlcpy(cfg->notif_position, npos, sizeof(cfg->notif_position));
         g_free(npos);
+    }
+    g_clear_error(&e);
+
+    char *lock_cmd = g_key_file_get_string(kf, "bindings", "lock_cmd", &e);
+    if (lock_cmd) {
+        g_strlcpy(cfg->lock_cmd, lock_cmd, sizeof(cfg->lock_cmd));
+        g_free(lock_cmd);
+    }
+    g_clear_error(&e);
+
+    char *power_cmd = g_key_file_get_string(kf, "bindings", "power_cmd", &e);
+    if (power_cmd) {
+        g_strlcpy(cfg->power_cmd, power_cmd, sizeof(cfg->power_cmd));
+        g_free(power_cmd);
     }
     g_clear_error(&e);
 

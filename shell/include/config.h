@@ -35,6 +35,9 @@ typedef struct {
     int notif_margin;
     int notif_spacing;
     char notif_position[16];
+
+    char lock_cmd[256];
+    char power_cmd[256];
 } NocoConfig;
 
 void noco_config_load(NocoConfig *cfg);

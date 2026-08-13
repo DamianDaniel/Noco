@@ -265,6 +265,7 @@ int main(int argc, char **argv) {
     a.window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
     gtk_window_set_title(GTK_WINDOW(a.window), "Noco Settings");
     gtk_window_set_decorated(GTK_WINDOW(a.window), FALSE);
+    gtk_window_set_type_hint(GTK_WINDOW(a.window), GDK_WINDOW_TYPE_HINT_UTILITY);
     gtk_window_set_position(GTK_WINDOW(a.window), GTK_WIN_POS_CENTER);
     gtk_widget_set_app_paintable(a.window, TRUE);
     gtk_widget_set_size_request(a.window, a.win_w, a.win_h);

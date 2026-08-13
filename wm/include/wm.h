@@ -100,6 +100,7 @@ Client *client_find_by_frame(WmState *wm, Window frame);
 void client_focus(WmState *wm, Client *c);
 void client_close(WmState *wm, Client *c);
 void client_move_resize(WmState *wm, Client *c, int x, int y, int w, int h);
+void client_reposition(WmState *wm, Client *c, int x, int y);
 void client_snap(WmState *wm, Client *c, SnapState snap);
 void client_toggle_maximize(WmState *wm, Client *c);
 void client_set_workspace(WmState *wm, Client *c, int workspace);
