@@ -1,0 +1,6 @@
+[Desktop Entry]
+Name=Noco
+Comment=A no-compositor desktop with pseudo-transparent effects
+Exec=noco-session
+Type=Application
+DesktopNames=Noco

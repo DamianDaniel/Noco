@@ -1,0 +1,11 @@
+#!/bin/sh
+
+noco-wm &
+WM_PID=$!
+
+sleep 0.3
+
+noco-notifyd &
+noco-panel &
+
+wait "$WM_PID"
