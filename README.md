@@ -21,7 +21,7 @@ Requires: gcc, make, libx11-dev, libxrandr-dev, libxinerama-dev,
 libgtk-3-dev, glib2.0-dev.
 
 ```
-./install.sh
+sudo ./install.sh
 ```
 
 Builds and installs all five binaries to `/usr/local/bin`, installs an

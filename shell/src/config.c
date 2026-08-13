@@ -25,7 +25,7 @@ static void set_defaults(NocoConfig *cfg) {
     cfg->workspace_count = 9;
 
     g_strlcpy(cfg->launcher_cmd, "noco-launcher", sizeof(cfg->launcher_cmd));
-    g_strlcpy(cfg->terminal_cmd, "xterm", sizeof(cfg->terminal_cmd));
+    g_strlcpy(cfg->terminal_cmd, "x-terminal-emulator", sizeof(cfg->terminal_cmd));
 
     cfg->notif_width = 320;
     cfg->notif_default_timeout_ms = 5000;

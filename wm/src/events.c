@@ -1,3 +1,4 @@
+#include <stdio.h>
 #include <string.h>
 #include <unistd.h>
 #include <signal.h>
@@ -13,9 +14,12 @@ static void spawn(const char *cmd) {
     if (pid == 0) {
         setsid();
         execlp("/bin/sh", "/bin/sh", "-c", cmd, (char *)NULL);
+        fprintf(stderr, "noco-wm: failed to spawn '%s'\n", cmd);
         _exit(127);
     } else if (pid > 0) {
         signal(SIGCHLD, SIG_IGN);
+    } else {
+        fprintf(stderr, "noco-wm: fork failed for '%s'\n", cmd);
     }
 }
 
@@ -114,7 +118,10 @@ void handle_button_press(WmState *wm, XButtonEvent *ev) {
 
     client_focus(wm, c);
 
-    if (!(ev->state & wm->cfg.mod_mask)) return;
+    if (!(ev->state & wm->cfg.mod_mask)) {
+        XAllowEvents(wm->dpy, ReplayPointer, CurrentTime);
+        return;
+    }
 
     wm->drag_active = 1;
     wm->drag_client = c;

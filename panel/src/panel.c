@@ -224,13 +224,14 @@ int main(int argc, char **argv) {
     gtk_widget_set_valign(hbox, GTK_ALIGN_CENTER);
 
     build_workspace_switcher(&p);
+    gtk_widget_set_valign(p.ws_box, GTK_ALIGN_CENTER);
     gtk_box_pack_start(GTK_BOX(hbox), p.ws_box, FALSE, FALSE, 0);
 
     p.clock_label = gtk_label_new("--:--");
     gtk_widget_set_name(p.clock_label, "clock-label");
     gtk_widget_set_halign(p.clock_label, GTK_ALIGN_END);
-    gtk_widget_set_hexpand(p.clock_label, TRUE);
-    gtk_box_pack_end(GTK_BOX(hbox), p.clock_label, FALSE, FALSE, 0);
+    gtk_widget_set_valign(p.clock_label, GTK_ALIGN_CENTER);
+    gtk_box_pack_end(GTK_BOX(hbox), p.clock_label, TRUE, TRUE, 0);
 
     gtk_overlay_add_overlay(GTK_OVERLAY(overlay), hbox);
     gtk_container_add(GTK_CONTAINER(p.window), overlay);

@@ -2,9 +2,63 @@
 #include <stdlib.h>
 #include <string.h>
 #include <X11/Xlib.h>
+#include <X11/Xatom.h>
+#include <X11/cursorfont.h>
+#include <cairo.h>
+#include <cairo-xlib.h>
 #include "wm.h"
 
 static WmState g_wm;
+
+static void set_default_cursor(WmState *wm) {
+    Cursor cursor = XCreateFontCursor(wm->dpy, XC_left_ptr);
+    XDefineCursor(wm->dpy, wm->root, cursor);
+    XFreeCursor(wm->dpy, cursor);
+}
+
+static void set_default_wallpaper(WmState *wm) {
+    Atom rootpmap_atom = XInternAtom(wm->dpy, "_XROOTPMAP_ID", False);
+    Atom actual_type;
+    int actual_format;
+    unsigned long nitems, bytes_after;
+    unsigned char *data = NULL;
+
+    if (XGetWindowProperty(wm->dpy, wm->root, rootpmap_atom, 0, 1, False,
+            XA_PIXMAP, &actual_type, &actual_format, &nitems, &bytes_after,
+            &data) == Success && data) {
+        Pixmap existing = *(Pixmap *)data;
+        XFree(data);
+        if (existing != None) return;
+    }
+
+    int depth = DefaultDepth(wm->dpy, wm->screen);
+    Pixmap pm = XCreatePixmap(wm->dpy, wm->root, wm->screen_w, wm->screen_h, depth);
+
+    cairo_surface_t *surface = cairo_xlib_surface_create(
+        wm->dpy, pm, DefaultVisual(wm->dpy, wm->screen), wm->screen_w, wm->screen_h);
+    cairo_t *cr = cairo_create(surface);
+
+    cairo_pattern_t *grad = cairo_pattern_create_linear(0, 0, wm->screen_w, wm->screen_h);
+    cairo_pattern_add_color_stop_rgb(grad, 0.0, 0.11, 0.12, 0.16);
+    cairo_pattern_add_color_stop_rgb(grad, 1.0, 0.05, 0.06, 0.09);
+    cairo_set_source(cr, grad);
+    cairo_paint(cr);
+    cairo_pattern_destroy(grad);
+
+    cairo_destroy(cr);
+    cairo_surface_flush(surface);
+    cairo_surface_destroy(surface);
+
+    XSetWindowBackgroundPixmap(wm->dpy, wm->root, pm);
+    XClearWindow(wm->dpy, wm->root);
+
+    XChangeProperty(wm->dpy, wm->root, rootpmap_atom, XA_PIXMAP, 32,
+        PropModeReplace, (unsigned char *)&pm, 1);
+
+    Atom esetroot_atom = XInternAtom(wm->dpy, "ESETROOT_PMAP_ID", False);
+    XChangeProperty(wm->dpy, wm->root, esetroot_atom, XA_PIXMAP, 32,
+        PropModeReplace, (unsigned char *)&pm, 1);
+}
 
 static int xerror_handler(Display *dpy, XErrorEvent *ev) {
     char buf[256];
@@ -67,6 +121,8 @@ int main(void) {
     wm->work_w = wm->screen_w;
     wm->work_h = wm->screen_h;
 
+    set_default_cursor(wm);
+    set_default_wallpaper(wm);
     grab_keys(wm);
     scan_existing_windows(wm);
     update_work_area(wm);
