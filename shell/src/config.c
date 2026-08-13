@@ -11,7 +11,12 @@ static void set_defaults(NocoConfig *cfg) {
     cfg->border_color = 0x3a3a3a;
     cfg->focus_color = 0x5e9eff;
 
-    cfg->panel_height = 34;
+    cfg->titlebar_height = 28;
+    cfg->frame_margin = 5;
+    cfg->titlebar_text_color = 0xf0f0f0;
+    cfg->titlebar_button_hover_color = 0xffffff;
+
+    cfg->panel_height = 42;
     cfg->corner_radius = 10;
     cfg->tint_r = 0.10;
     cfg->tint_g = 0.10;
@@ -20,7 +25,7 @@ static void set_defaults(NocoConfig *cfg) {
     cfg->border_alpha = 0.12;
     cfg->highlight_alpha = 0.06;
     cfg->blur_downscale = 6;
-    cfg->panel_position = NOCO_PANEL_TOP;
+    cfg->panel_position = NOCO_PANEL_BOTTOM;
 
     cfg->workspace_count = 9;
 
@@ -105,6 +110,18 @@ void noco_config_load(NocoConfig *cfg) {
 
     char *fc = g_key_file_get_string(kf, "theme", "focus_color", &e);
     if (fc) { cfg->focus_color = parse_color(fc, cfg->focus_color); g_free(fc); }
+    g_clear_error(&e);
+
+    int th = g_key_file_get_integer(kf, "theme", "titlebar_height", &e);
+    if (!e) cfg->titlebar_height = th;
+    g_clear_error(&e);
+
+    int fm = g_key_file_get_integer(kf, "theme", "frame_margin", &e);
+    if (!e) cfg->frame_margin = fm;
+    g_clear_error(&e);
+
+    char *ttc = g_key_file_get_string(kf, "theme", "titlebar_text_color", &e);
+    if (ttc) { cfg->titlebar_text_color = parse_color(ttc, cfg->titlebar_text_color); g_free(ttc); }
     g_clear_error(&e);
 
     int ph = g_key_file_get_integer(kf, "theme", "panel_height", &e);

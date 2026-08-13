@@ -15,9 +15,6 @@
 #define CARD_GAP 12
 #define CARD_PADDING 24
 
-static WallpaperCache g_switcher_wc;
-static int g_switcher_wc_init = 0;
-
 static void compute_mod_keycodes(WmState *wm) {
     wm->switcher_mod_keycode_count = 0;
     XModifierKeymap *map = XGetModifierMapping(wm->dpy);
@@ -69,7 +66,7 @@ static void switcher_draw(WmState *wm) {
     cairo_t *cr = cairo_create(surface);
 
     cairo_save(cr);
-    noco_draw_pseudo_transparent(cr, &g_switcher_wc, &wm->cfg,
+    noco_draw_pseudo_transparent(cr, &wm->wc, &wm->cfg,
         wa.x, wa.y, wa.width, wa.height, wm->cfg.corner_radius, NOCO_CORNER_ALL);
     cairo_restore(cr);
 
@@ -146,12 +143,7 @@ void switcher_begin(WmState *wm, int forward) {
     wm->switcher_count = count;
     wm->switcher_selected = (focused_index + (forward ? 1 : count - 1)) % count;
 
-    if (!g_switcher_wc_init) {
-        wallpaper_cache_init(&g_switcher_wc, wm->dpy, wm->root);
-        g_switcher_wc_init = 1;
-    } else {
-        wallpaper_cache_refresh(&g_switcher_wc);
-    }
+    wallpaper_cache_refresh(&wm->wc);
 
     int width = CARD_PADDING * 2 + count * CARD_W + (count - 1) * CARD_GAP;
     if (width > wm->screen_w - 40) width = wm->screen_w - 40;

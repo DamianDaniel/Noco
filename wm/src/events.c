@@ -70,9 +70,12 @@ void handle_configure_request(WmState *wm, XConfigureRequestEvent *ev) {
     }
 
     if (ev->value_mask & (CWWidth | CWHeight)) {
-        int w = (ev->value_mask & CWWidth) ? ev->width : c->w;
-        int h = (ev->value_mask & CWHeight) ? ev->height : c->h;
-        client_move_resize(wm, c, c->x, c->y, w, h);
+        int content_w = (ev->value_mask & CWWidth) ? ev->width : c->w - 2 * wm->cfg.frame_margin;
+        int content_h = (ev->value_mask & CWHeight) ? ev->height
+            : c->h - wm->cfg.titlebar_height - wm->cfg.frame_margin;
+        int frame_w = content_w + 2 * wm->cfg.frame_margin;
+        int frame_h = content_h + wm->cfg.titlebar_height + wm->cfg.frame_margin;
+        client_move_resize(wm, c, c->x, c->y, frame_w, frame_h);
     }
 }
 
@@ -95,25 +98,133 @@ void handle_destroy_notify(WmState *wm, XDestroyWindowEvent *ev) {
 }
 
 void handle_property_notify(WmState *wm, XPropertyEvent *ev) {
-    if (ev->atom == wm->net_wm_strut || ev->atom == wm->net_wm_strut_partial) {
-        update_work_area(wm);
+    if (ev->window == wm->root) {
+        if (ev->atom == wm->net_wm_strut || ev->atom == wm->net_wm_strut_partial) {
+            update_work_area(wm);
+        } else {
+            Atom rootpmap = XInternAtom(wm->dpy, "_XROOTPMAP_ID", False);
+            if (ev->atom == rootpmap) {
+                wallpaper_cache_refresh(&wm->wc);
+                for (Client *c = wm->clients; c; c = c->next) redraw_decorations(wm, c);
+            }
+        }
+        return;
+    }
+
+    Client *c = client_find(wm, ev->window);
+    if (!c) return;
+
+    Atom wm_name = XInternAtom(wm->dpy, "WM_NAME", False);
+    Atom net_wm_name = XInternAtom(wm->dpy, "_NET_WM_NAME", False);
+    if (ev->atom == wm_name || ev->atom == net_wm_name) {
+        redraw_decorations(wm, c);
     }
 }
 
 void handle_client_message(WmState *wm, XClientMessageEvent *ev) {
     if (ev->message_type == wm->net_current_desktop) {
         workspace_switch(wm, (int)ev->data.l[0]);
+        return;
+    }
+
+    if (ev->message_type == wm->net_active_window) {
+        Client *c = client_find(wm, ev->window);
+        if (!c) return;
+        if (c->workspace != wm->active_workspace) workspace_switch(wm, c->workspace);
+        if (c->minimized) client_restore(wm, c);
+        else client_focus(wm, c);
+        return;
+    }
+
+    if (ev->message_type == wm->net_wm_state) {
+        Client *c = client_find(wm, ev->window);
+        if (!c) return;
+        Atom prop = (Atom)ev->data.l[1];
+        if (prop != wm->net_wm_state_hidden) return;
+
+        long action = ev->data.l[0];
+        if (action == 1) {
+            client_minimize(wm, c);
+        } else if (action == 0) {
+            client_restore(wm, c);
+        } else {
+            if (c->minimized) client_restore(wm, c);
+            else client_minimize(wm, c);
+        }
     }
 }
 
 void handle_enter_notify(WmState *wm, XCrossingEvent *ev) {
-    Client *c = client_find_by_frame(wm, ev->window);
-    if (c) client_focus(wm, c);
+    (void)wm;
+    (void)ev;
 }
 
 void handle_button_press(WmState *wm, XButtonEvent *ev) {
-    Client *c = client_find(wm, ev->window);
-    if (!c) c = client_find_by_frame(wm, ev->window);
+    Client *c = client_find_by_frame(wm, ev->window);
+    if (c) {
+        client_focus(wm, c);
+
+        int edges;
+        int hit = hit_test_frame(wm, c, ev->x, ev->y, &edges);
+
+        if (hit == HIT_CLOSE) {
+            client_close(wm, c);
+            return;
+        }
+        if (hit == HIT_MINIMIZE) {
+            client_minimize(wm, c);
+            return;
+        }
+        if (hit == HIT_MAXIMIZE) {
+            client_toggle_maximize(wm, c);
+            return;
+        }
+
+        if (hit == HIT_TITLEBAR) {
+            if (wm->last_titlebar_click_client == c &&
+                    ev->time - wm->last_titlebar_click_time < 400) {
+                client_toggle_maximize(wm, c);
+                wm->last_titlebar_click_client = NULL;
+                return;
+            }
+            wm->last_titlebar_click_client = c;
+            wm->last_titlebar_click_time = ev->time;
+
+            wm->drag_active = 1;
+            wm->drag_mode = DRAG_MOVE;
+            wm->drag_client = c;
+            wm->drag_start_x = ev->x_root;
+            wm->drag_start_y = ev->y_root;
+            wm->drag_orig_x = c->x;
+            wm->drag_orig_y = c->y;
+            wm->drag_orig_w = c->w;
+            wm->drag_orig_h = c->h;
+            XGrabPointer(wm->dpy, c->frame, True,
+                ButtonReleaseMask | PointerMotionMask,
+                GrabModeAsync, GrabModeAsync, None, None, CurrentTime);
+            return;
+        }
+
+        if (hit == HIT_RESIZE) {
+            wm->drag_active = 1;
+            wm->drag_mode = DRAG_RESIZE;
+            wm->drag_edges = edges;
+            wm->drag_client = c;
+            wm->drag_start_x = ev->x_root;
+            wm->drag_start_y = ev->y_root;
+            wm->drag_orig_x = c->x;
+            wm->drag_orig_y = c->y;
+            wm->drag_orig_w = c->w;
+            wm->drag_orig_h = c->h;
+            XGrabPointer(wm->dpy, c->frame, True,
+                ButtonReleaseMask | PointerMotionMask,
+                GrabModeAsync, GrabModeAsync, None, None, CurrentTime);
+            return;
+        }
+        return;
+    }
+
+    c = client_find(wm, ev->window);
     if (!c) return;
 
     client_focus(wm, c);
@@ -124,6 +235,8 @@ void handle_button_press(WmState *wm, XButtonEvent *ev) {
     }
 
     wm->drag_active = 1;
+    wm->drag_mode = (ev->button == 3) ? DRAG_RESIZE : DRAG_MOVE;
+    wm->drag_edges = EDGE_E | EDGE_S;
     wm->drag_client = c;
     wm->drag_start_x = ev->x_root;
     wm->drag_start_y = ev->y_root;
@@ -131,7 +244,6 @@ void handle_button_press(WmState *wm, XButtonEvent *ev) {
     wm->drag_orig_y = c->y;
     wm->drag_orig_w = c->w;
     wm->drag_orig_h = c->h;
-    wm->drag_is_resize = (ev->button == 3);
 
     XGrabPointer(wm->dpy, c->frame, True,
         ButtonReleaseMask | PointerMotionMask,
@@ -144,6 +256,8 @@ void handle_button_release(WmState *wm, XButtonEvent *ev) {
     if (wm->drag_active) {
         XUngrabPointer(wm->dpy, CurrentTime);
         wm->drag_active = 0;
+        wm->drag_mode = DRAG_NONE;
+        wm->drag_edges = EDGE_NONE;
         wm->drag_client = NULL;
     }
 }
@@ -155,12 +269,25 @@ void handle_motion_notify(WmState *wm, XMotionEvent *ev) {
     int dy = ev->y_root - wm->drag_start_y;
     Client *c = wm->drag_client;
 
-    if (wm->drag_is_resize) {
-        client_move_resize(wm, c, c->x, c->y,
-            wm->drag_orig_w + dx, wm->drag_orig_h + dy);
-    } else {
+    if (wm->drag_mode == DRAG_MOVE) {
         client_move_resize(wm, c,
             wm->drag_orig_x + dx, wm->drag_orig_y + dy, c->w, c->h);
+    } else if (wm->drag_mode == DRAG_RESIZE) {
+        int x = wm->drag_orig_x, y = wm->drag_orig_y;
+        int w = wm->drag_orig_w, h = wm->drag_orig_h;
+
+        if (wm->drag_edges & EDGE_E) w = wm->drag_orig_w + dx;
+        if (wm->drag_edges & EDGE_S) h = wm->drag_orig_h + dy;
+        if (wm->drag_edges & EDGE_W) {
+            w = wm->drag_orig_w - dx;
+            x = wm->drag_orig_x + dx;
+        }
+        if (wm->drag_edges & EDGE_N) {
+            h = wm->drag_orig_h - dy;
+            y = wm->drag_orig_y + dy;
+        }
+
+        client_move_resize(wm, c, x, y, w, h);
     }
 }
 

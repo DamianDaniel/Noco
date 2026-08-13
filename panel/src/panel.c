@@ -14,6 +14,8 @@ typedef struct {
     GtkWidget *clock_label;
     GtkWidget *ws_box;
     GtkWidget *ws_buttons[9];
+    GtkWidget *task_box;
+    GtkWidget *start_btn;
     WallpaperCache wc;
     Display *dpy;
     Window root;
@@ -23,7 +25,12 @@ typedef struct {
     Atom net_wm_strut_partial;
     Atom net_wm_window_type;
     Atom net_wm_window_type_dock;
-    guint root_watch_source;
+    Atom net_client_list;
+    Atom net_active_window;
+    Atom net_wm_desktop;
+    Atom net_wm_state;
+    Atom net_wm_state_hidden;
+    Atom net_wm_name;
 } Panel;
 
 static void set_dock_hints(Panel *p) {
@@ -109,6 +116,170 @@ static void on_ws_button_clicked(GtkButton *btn, gpointer data) {
     refresh_ws_buttons(p);
 }
 
+static void on_start_clicked(GtkButton *btn, gpointer data) {
+    (void)btn;
+    Panel *p = (Panel *)data;
+    GError *err = NULL;
+    if (!g_spawn_command_line_async(p->cfg.launcher_cmd, &err)) {
+        g_printerr("noco-panel: failed to launch '%s': %s\n",
+            p->cfg.launcher_cmd, err ? err->message : "unknown error");
+        if (err) g_error_free(err);
+    }
+}
+
+static Window get_active_window(Panel *p) {
+    Atom actual_type;
+    int actual_format;
+    unsigned long nitems, bytes_after;
+    unsigned char *data = NULL;
+    Window active = None;
+
+    if (XGetWindowProperty(p->dpy, p->root, p->net_active_window, 0, 1, False,
+            XA_WINDOW, &actual_type, &actual_format, &nitems, &bytes_after,
+            &data) == Success && data) {
+        active = *(Window *)data;
+        XFree(data);
+    }
+    return active;
+}
+
+static int window_is_hidden(Panel *p, Window w) {
+    Atom actual_type;
+    int actual_format;
+    unsigned long nitems, bytes_after;
+    unsigned char *data = NULL;
+    int hidden = 0;
+
+    if (XGetWindowProperty(p->dpy, w, p->net_wm_state, 0, 16, False,
+            XA_ATOM, &actual_type, &actual_format, &nitems, &bytes_after,
+            &data) == Success && data) {
+        Atom *atoms = (Atom *)data;
+        for (unsigned long i = 0; i < nitems; i++) {
+            if (atoms[i] == p->net_wm_state_hidden) hidden = 1;
+        }
+        XFree(data);
+    }
+    return hidden;
+}
+
+static long window_desktop(Panel *p, Window w) {
+    Atom actual_type;
+    int actual_format;
+    unsigned long nitems, bytes_after;
+    unsigned char *data = NULL;
+    long desktop = -1;
+
+    if (XGetWindowProperty(p->dpy, w, p->net_wm_desktop, 0, 1, False,
+            XA_CARDINAL, &actual_type, &actual_format, &nitems, &bytes_after,
+            &data) == Success && data) {
+        desktop = *(long *)data;
+        XFree(data);
+    }
+    return desktop;
+}
+
+static void get_window_title(Panel *p, Window w, char *buf, size_t buflen) {
+    char *name = NULL;
+    if (XFetchName(p->dpy, w, &name) && name) {
+        snprintf(buf, buflen, "%s", name);
+        XFree(name);
+    } else {
+        snprintf(buf, buflen, "Untitled");
+    }
+}
+
+static void send_active_window_request(Panel *p, Window target) {
+    XEvent ev = {0};
+    ev.xclient.type = ClientMessage;
+    ev.xclient.window = target;
+    ev.xclient.message_type = p->net_active_window;
+    ev.xclient.format = 32;
+    ev.xclient.data.l[0] = 2;
+    XSendEvent(p->dpy, p->root, False,
+        SubstructureRedirectMask | SubstructureNotifyMask, &ev);
+    XFlush(p->dpy);
+}
+
+static void send_toggle_hidden(Panel *p, Window target) {
+    XEvent ev = {0};
+    ev.xclient.type = ClientMessage;
+    ev.xclient.window = target;
+    ev.xclient.message_type = p->net_wm_state;
+    ev.xclient.format = 32;
+    ev.xclient.data.l[0] = 2;
+    ev.xclient.data.l[1] = (long)p->net_wm_state_hidden;
+    XSendEvent(p->dpy, p->root, False,
+        SubstructureRedirectMask | SubstructureNotifyMask, &ev);
+    XFlush(p->dpy);
+}
+
+static void on_task_clicked(GtkButton *btn, gpointer data) {
+    Panel *p = (Panel *)data;
+    Window w = (Window)(intptr_t)g_object_get_data(G_OBJECT(btn), "task-window");
+    Window active = get_active_window(p);
+
+    if (w == active && !window_is_hidden(p, w)) {
+        send_toggle_hidden(p, w);
+    } else {
+        send_active_window_request(p, w);
+    }
+}
+
+static void refresh_tasks(Panel *p) {
+    GList *children = gtk_container_get_children(GTK_CONTAINER(p->task_box));
+    for (GList *it = children; it; it = it->next) gtk_widget_destroy(GTK_WIDGET(it->data));
+    g_list_free(children);
+
+    Atom actual_type;
+    int actual_format;
+    unsigned long nitems, bytes_after;
+    unsigned char *data = NULL;
+
+    if (XGetWindowProperty(p->dpy, p->root, p->net_client_list, 0, 256, False,
+            XA_WINDOW, &actual_type, &actual_format, &nitems, &bytes_after,
+            &data) != Success || !data) {
+        return;
+    }
+
+    Window *wins = (Window *)data;
+    Window active = get_active_window(p);
+
+    for (unsigned long i = 0; i < nitems; i++) {
+        Window w = wins[i];
+        long desktop = window_desktop(p, w);
+        if (desktop >= 0 && desktop != p->active_workspace) continue;
+
+        char title[128];
+        get_window_title(p, w, title, sizeof(title));
+        int hidden = window_is_hidden(p, w);
+
+        GtkWidget *btn = gtk_button_new();
+        gtk_widget_set_name(btn, "task-button");
+        GtkWidget *label = gtk_label_new(title);
+        gtk_label_set_ellipsize(GTK_LABEL(label), PANGO_ELLIPSIZE_END);
+        gtk_label_set_max_width_chars(GTK_LABEL(label), 18);
+        gtk_container_add(GTK_CONTAINER(btn), label);
+
+        GtkStyleContext *ctx = gtk_widget_get_style_context(btn);
+        if (w == active && !hidden) gtk_style_context_add_class(ctx, "task-active");
+        if (hidden) gtk_style_context_add_class(ctx, "task-hidden");
+
+        g_object_set_data(G_OBJECT(btn), "task-window", (gpointer)(intptr_t)w);
+        g_signal_connect(btn, "clicked", G_CALLBACK(on_task_clicked), p);
+
+        gtk_box_pack_start(GTK_BOX(p->task_box), btn, FALSE, FALSE, 0);
+    }
+
+    XFree(data);
+    gtk_widget_show_all(p->task_box);
+}
+
+static gboolean on_periodic_refresh(gpointer data) {
+    Panel *p = (Panel *)data;
+    refresh_tasks(p);
+    return G_SOURCE_CONTINUE;
+}
+
 static GdkFilterReturn root_event_filter(GdkXEvent *xevent, GdkEvent *event, gpointer data) {
     Panel *p = (Panel *)data;
     (void)event;
@@ -132,7 +303,11 @@ static GdkFilterReturn root_event_filter(GdkXEvent *xevent, GdkEvent *event, gpo
                 p->active_workspace = *(long *)data_ptr;
                 XFree(data_ptr);
                 refresh_ws_buttons(p);
+                refresh_tasks(p);
             }
+        } else if (ev->xproperty.atom == p->net_client_list ||
+                   ev->xproperty.atom == p->net_active_window) {
+            refresh_tasks(p);
         }
     }
     return GDK_FILTER_CONTINUE;
@@ -159,10 +334,11 @@ static void apply_css(void) {
         "  background: transparent;"
         "  border: none;"
         "  color: rgba(255,255,255,0.7);"
-        "  min-width: 22px;"
-        "  min-height: 22px;"
+        "  min-width: 20px;"
+        "  min-height: 20px;"
         "  padding: 0;"
         "  border-radius: 5px;"
+        "  font-size: 11px;"
         "}"
         "#ws-button.ws-active {"
         "  background: rgba(255,255,255,0.16);"
@@ -171,7 +347,30 @@ static void apply_css(void) {
         "#clock-label {"
         "  color: rgba(255,255,255,0.85);"
         "  font-weight: 600;"
-        "}";
+        "}"
+        "#start-button {"
+        "  background: rgba(94,158,255,0.85);"
+        "  color: white;"
+        "  border: none;"
+        "  border-radius: 8px;"
+        "  font-weight: 700;"
+        "  padding: 4px 14px;"
+        "}"
+        "#start-button:hover { background: rgba(120,175,255,0.95); }"
+        "#task-button {"
+        "  background: rgba(255,255,255,0.06);"
+        "  border: none;"
+        "  color: rgba(255,255,255,0.85);"
+        "  border-radius: 6px;"
+        "  padding: 4px 10px;"
+        "  min-width: 90px;"
+        "}"
+        "#task-button.task-active {"
+        "  background: rgba(255,255,255,0.20);"
+        "  color: white;"
+        "}"
+        "#task-button.task-hidden { color: rgba(255,255,255,0.45); }"
+        "#task-button:hover { background: rgba(255,255,255,0.14); }";
     gtk_css_provider_load_from_data(provider, css, -1, NULL);
     gtk_style_context_add_provider_for_screen(
         gdk_screen_get_default(), GTK_STYLE_PROVIDER(provider),
@@ -218,10 +417,20 @@ int main(int argc, char **argv) {
     GtkWidget *overlay = gtk_overlay_new();
     gtk_container_add(GTK_CONTAINER(overlay), p.drawing_area);
 
-    GtkWidget *hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+    GtkWidget *hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
     gtk_widget_set_margin_start(hbox, 8);
     gtk_widget_set_margin_end(hbox, 8);
     gtk_widget_set_valign(hbox, GTK_ALIGN_CENTER);
+
+    p.start_btn = gtk_button_new_with_label("Menu");
+    gtk_widget_set_name(p.start_btn, "start-button");
+    gtk_widget_set_valign(p.start_btn, GTK_ALIGN_CENTER);
+    g_signal_connect(p.start_btn, "clicked", G_CALLBACK(on_start_clicked), &p);
+    gtk_box_pack_start(GTK_BOX(hbox), p.start_btn, FALSE, FALSE, 0);
+
+    p.task_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
+    gtk_widget_set_valign(p.task_box, GTK_ALIGN_CENTER);
+    gtk_box_pack_start(GTK_BOX(hbox), p.task_box, TRUE, TRUE, 0);
 
     build_workspace_switcher(&p);
     gtk_widget_set_valign(p.ws_box, GTK_ALIGN_CENTER);
@@ -231,7 +440,7 @@ int main(int argc, char **argv) {
     gtk_widget_set_name(p.clock_label, "clock-label");
     gtk_widget_set_halign(p.clock_label, GTK_ALIGN_END);
     gtk_widget_set_valign(p.clock_label, GTK_ALIGN_CENTER);
-    gtk_box_pack_end(GTK_BOX(hbox), p.clock_label, TRUE, TRUE, 0);
+    gtk_box_pack_end(GTK_BOX(hbox), p.clock_label, FALSE, FALSE, 0);
 
     gtk_overlay_add_overlay(GTK_OVERLAY(overlay), hbox);
     gtk_container_add(GTK_CONTAINER(p.window), overlay);
@@ -243,6 +452,12 @@ int main(int argc, char **argv) {
     p.net_wm_strut_partial = XInternAtom(p.dpy, "_NET_WM_STRUT_PARTIAL", False);
     p.net_wm_window_type = XInternAtom(p.dpy, "_NET_WM_WINDOW_TYPE", False);
     p.net_wm_window_type_dock = XInternAtom(p.dpy, "_NET_WM_WINDOW_TYPE_DOCK", False);
+    p.net_client_list = XInternAtom(p.dpy, "_NET_CLIENT_LIST", False);
+    p.net_active_window = XInternAtom(p.dpy, "_NET_ACTIVE_WINDOW", False);
+    p.net_wm_desktop = XInternAtom(p.dpy, "_NET_WM_DESKTOP", False);
+    p.net_wm_state = XInternAtom(p.dpy, "_NET_WM_STATE", False);
+    p.net_wm_state_hidden = XInternAtom(p.dpy, "_NET_WM_STATE_HIDDEN", False);
+    p.net_wm_name = XInternAtom(p.dpy, "_NET_WM_NAME", False);
 
     wallpaper_cache_init(&p.wc, p.dpy, p.root);
 
@@ -253,7 +468,9 @@ int main(int argc, char **argv) {
     set_dock_hints(&p);
 
     refresh_ws_buttons(&p);
+    refresh_tasks(&p);
     g_timeout_add_seconds(1, update_clock, &p);
+    g_timeout_add_seconds(2, on_periodic_refresh, &p);
     update_clock(&p);
 
     gtk_main();

@@ -13,6 +13,11 @@ typedef struct {
     unsigned long border_color;
     unsigned long focus_color;
 
+    int titlebar_height;
+    int frame_margin;
+    unsigned long titlebar_text_color;
+    unsigned long titlebar_button_hover_color;
+
     int panel_height;
     int corner_radius;
     double tint_r, tint_g, tint_b, tint_alpha;

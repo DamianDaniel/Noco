@@ -123,6 +123,7 @@ int main(void) {
 
     set_default_cursor(wm);
     set_default_wallpaper(wm);
+    wallpaper_cache_init(&wm->wc, wm->dpy, wm->root);
     grab_keys(wm);
     scan_existing_windows(wm);
     update_work_area(wm);
@@ -174,6 +175,10 @@ int main(void) {
                 break;
             case Expose:
                 switcher_handle_expose(wm, &ev.xexpose);
+                if (ev.xexpose.count == 0) {
+                    Client *ec = client_find_by_frame(wm, ev.xexpose.window);
+                    if (ec) redraw_decorations(wm, ec);
+                }
                 break;
             case ClientMessage:
                 handle_client_message(wm, &ev.xclient);

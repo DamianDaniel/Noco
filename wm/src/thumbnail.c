@@ -19,14 +19,13 @@ void thumbnail_path_for(Window win, char *buf, size_t buflen) {
 }
 
 void capture_client_thumbnail(WmState *wm, Client *c) {
-    if (c->w <= 0 || c->h <= 0) return;
-
     XWindowAttributes attr;
     if (!XGetWindowAttributes(wm->dpy, c->win, &attr)) return;
     if (attr.map_state != IsViewable) return;
+    if (attr.width <= 0 || attr.height <= 0) return;
 
     cairo_surface_t *src = cairo_xlib_surface_create(
-        wm->dpy, c->win, attr.visual, c->w, c->h);
+        wm->dpy, c->win, attr.visual, attr.width, attr.height);
     cairo_surface_flush(src);
 
     if (cairo_surface_status(src) != CAIRO_STATUS_SUCCESS) {
@@ -34,12 +33,12 @@ void capture_client_thumbnail(WmState *wm, Client *c) {
         return;
     }
 
-    double scale = (double)NOCO_THUMB_MAX_W / c->w;
-    if ((double)NOCO_THUMB_MAX_H / c->h < scale) scale = (double)NOCO_THUMB_MAX_H / c->h;
+    double scale = (double)NOCO_THUMB_MAX_W / attr.width;
+    if ((double)NOCO_THUMB_MAX_H / attr.height < scale) scale = (double)NOCO_THUMB_MAX_H / attr.height;
     if (scale > 1.0) scale = 1.0;
 
-    int tw = (int)(c->w * scale);
-    int th = (int)(c->h * scale);
+    int tw = (int)(attr.width * scale);
+    int th = (int)(attr.height * scale);
     if (tw < 1) tw = 1;
     if (th < 1) th = 1;
 

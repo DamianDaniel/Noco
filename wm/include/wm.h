@@ -3,9 +3,28 @@
 
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
+#include <stddef.h>
 #include "config.h"
+#include "wallpaper.h"
 
 #define NOCO_MAX_WORKSPACES 9
+
+#define DRAG_NONE 0
+#define DRAG_MOVE 1
+#define DRAG_RESIZE 2
+
+#define EDGE_NONE 0
+#define EDGE_N (1 << 0)
+#define EDGE_S (1 << 1)
+#define EDGE_E (1 << 2)
+#define EDGE_W (1 << 3)
+
+#define HIT_NONE 0
+#define HIT_TITLEBAR 1
+#define HIT_CLOSE 2
+#define HIT_MAXIMIZE 3
+#define HIT_MINIMIZE 4
+#define HIT_RESIZE 5
 
 typedef enum {
     SNAP_NONE,
@@ -36,15 +55,19 @@ typedef struct {
     int screen;
     int screen_w, screen_h;
     int work_x, work_y, work_w, work_h;
+    WallpaperCache wc;
     Client *clients;
     Client *focused;
     int active_workspace;
 
     int drag_active;
-    int drag_is_resize;
+    int drag_mode;
+    int drag_edges;
     Client *drag_client;
     int drag_start_x, drag_start_y;
     int drag_orig_x, drag_orig_y, drag_orig_w, drag_orig_h;
+    Time last_titlebar_click_time;
+    Client *last_titlebar_click_client;
 
     Atom wm_delete_window;
     Atom wm_protocols;
@@ -113,5 +136,9 @@ void switcher_end(WmState *wm, int commit);
 void switcher_handle_keypress(WmState *wm, XKeyEvent *ev);
 void switcher_handle_keyrelease(WmState *wm, XKeyEvent *ev);
 void switcher_handle_expose(WmState *wm, XExposeEvent *ev);
+
+void redraw_decorations(WmState *wm, Client *c);
+int hit_test_frame(WmState *wm, Client *c, int lx, int ly, int *out_edges);
+void get_client_title(WmState *wm, Client *c, char *buf, size_t buflen);
 
 #endif

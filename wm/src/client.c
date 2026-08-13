@@ -15,36 +15,51 @@ Client *client_find_by_frame(WmState *wm, Window frame) {
     return NULL;
 }
 
+static void content_geometry(WmState *wm, Client *c, int *cx, int *cy, int *cw, int *ch) {
+    int m = wm->cfg.frame_margin;
+    int tb = wm->cfg.titlebar_height;
+    *cx = m;
+    *cy = tb;
+    *cw = c->w - 2 * m;
+    if (*cw < 1) *cw = 1;
+    *ch = c->h - tb - m;
+    if (*ch < 1) *ch = 1;
+}
+
 Client *client_create(WmState *wm, Window w) {
     XWindowAttributes attr;
     if (!XGetWindowAttributes(wm->dpy, w, &attr)) return NULL;
+
+    int m = wm->cfg.frame_margin;
+    int tb = wm->cfg.titlebar_height;
 
     Client *c = calloc(1, sizeof(Client));
     c->win = w;
     c->x = attr.x;
     c->y = attr.y;
-    c->w = attr.width;
-    c->h = attr.height;
+    c->w = attr.width + 2 * m;
+    c->h = attr.height + tb + m;
     c->workspace = wm->active_workspace;
     c->snap = SNAP_NONE;
 
     XSetWindowAttributes fattr;
-    fattr.background_pixel = BlackPixel(wm->dpy, wm->screen);
-    fattr.border_pixel = wm->cfg.border_color;
+    fattr.background_pixel = wm->cfg.border_color;
     fattr.event_mask = SubstructureRedirectMask | SubstructureNotifyMask |
                         ButtonPressMask | ButtonReleaseMask | PointerMotionMask |
-                        EnterWindowMask;
+                        EnterWindowMask | ExposureMask;
 
     c->frame = XCreateWindow(wm->dpy, wm->root,
-        c->x, c->y, c->w, c->h, wm->cfg.border_width,
+        c->x, c->y, c->w, c->h, 0,
         CopyFromParent, InputOutput, CopyFromParent,
-        CWBackPixel | CWBorderPixel | CWEventMask, &fattr);
+        CWBackPixel | CWEventMask, &fattr);
 
-    XSetWindowBorderWidth(wm->dpy, c->frame, wm->cfg.border_width);
+    int cx, cy, cw, ch;
+    content_geometry(wm, c, &cx, &cy, &cw, &ch);
 
     XAddToSaveSet(wm->dpy, w);
-    XReparentWindow(wm->dpy, w, c->frame, 0, 0);
-    XResizeWindow(wm->dpy, w, c->w, c->h);
+    XReparentWindow(wm->dpy, w, c->frame, cx, cy);
+    XResizeWindow(wm->dpy, w, cw, ch);
+    XSelectInput(wm->dpy, w, PropertyChangeMask);
     XMapWindow(wm->dpy, w);
     XMapWindow(wm->dpy, c->frame);
 
@@ -55,6 +70,8 @@ Client *client_create(WmState *wm, Window w) {
 
     thumbnail_path_for(c->win, c->thumb_path, sizeof(c->thumb_path));
     c->has_thumb = 0;
+
+    redraw_decorations(wm, c);
 
     return c;
 }
@@ -82,14 +99,18 @@ void client_destroy(WmState *wm, Client *c) {
 }
 
 void client_focus(WmState *wm, Client *c) {
-    if (wm->focused && wm->focused != c) {
-        XSetWindowBorder(wm->dpy, wm->focused->frame, wm->cfg.border_color);
-    }
+    Client *prev = wm->focused;
     wm->focused = c;
+
+    if (prev && prev != c) redraw_decorations(wm, prev);
     if (!c) return;
-    XSetWindowBorder(wm->dpy, c->frame, wm->cfg.focus_color);
+
+    redraw_decorations(wm, c);
     XSetInputFocus(wm->dpy, c->win, RevertToPointerRoot, CurrentTime);
     XRaiseWindow(wm->dpy, c->frame);
+
+    XChangeProperty(wm->dpy, wm->root, wm->net_active_window, XA_WINDOW, 32,
+        PropModeReplace, (unsigned char *)&c->win, 1);
 }
 
 void client_close(WmState *wm, Client *c) {
@@ -117,15 +138,26 @@ void client_close(WmState *wm, Client *c) {
 }
 
 void client_move_resize(WmState *wm, Client *c, int x, int y, int w, int h) {
-    if (w < 100) w = 100;
-    if (h < 60) h = 60;
+    int m = wm->cfg.frame_margin;
+    int tb = wm->cfg.titlebar_height;
+    int min_w = 120 + 2 * m;
+    int min_h = 80 + tb + m;
+    if (w < min_w) w = min_w;
+    if (h < min_h) h = min_h;
+
     c->x = x;
     c->y = y;
     c->w = w;
     c->h = h;
     c->snap = SNAP_NONE;
+
     XMoveResizeWindow(wm->dpy, c->frame, x, y, w, h);
-    XResizeWindow(wm->dpy, c->win, w, h);
+
+    int cx, cy, cw, ch;
+    content_geometry(wm, c, &cx, &cy, &cw, &ch);
+    XMoveResizeWindow(wm->dpy, c->win, cx, cy, cw, ch);
+
+    redraw_decorations(wm, c);
 }
 
 void client_snap(WmState *wm, Client *c, SnapState snap) {
@@ -170,18 +202,29 @@ void client_toggle_maximize(WmState *wm, Client *c) {
     }
 }
 
+static void set_hidden_state(WmState *wm, Client *c, int hidden) {
+    if (hidden) {
+        XChangeProperty(wm->dpy, c->win, wm->net_wm_state, XA_ATOM, 32,
+            PropModeReplace, (unsigned char *)&wm->net_wm_state_hidden, 1);
+    } else {
+        XDeleteProperty(wm->dpy, c->win, wm->net_wm_state);
+    }
+}
+
 void client_minimize(WmState *wm, Client *c) {
     if (c->minimized) return;
     capture_client_thumbnail(wm, c);
     c->minimized = 1;
     XUnmapWindow(wm->dpy, c->frame);
     if (wm->focused == c) wm->focused = NULL;
+    set_hidden_state(wm, c, 1);
 }
 
 void client_restore(WmState *wm, Client *c) {
     if (!c->minimized) return;
     c->minimized = 0;
     XMapWindow(wm->dpy, c->frame);
+    set_hidden_state(wm, c, 0);
     client_focus(wm, c);
 }
 
