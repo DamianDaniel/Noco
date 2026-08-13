@@ -1,8 +1,8 @@
 # Noco
 
-A Linux desktop environment with no compositor. All visual depth and
+A Linux desktop environment with **no co**mpositor. All visual depth and
 transparency come from window decorations, wallpaper sampling, cached
-snapshots, and theme rules — not from a compositing manager.
+snapshots, and theme rules, not from a compositing manager.
 
 ## Components
 
